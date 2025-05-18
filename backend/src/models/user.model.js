@@ -21,7 +21,8 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: ['admin', 'mentor'],
-    required: true
+    required: true,
+    default:"mentor"
   },
   hourlyRate: {
     type: Number,
@@ -32,30 +33,30 @@ const userSchema = new mongoose.Schema({
   taxInfo: {
     pan: {
       type: String,
-      required: function() {
-        return this.role === 'mentor';
-      }
+      // required: function() {
+      //   return this.role === 'mentor';
+      // }
     },
     gst: String
   },
   bankDetails: {
     accountNumber: {
       type: String,
-      required: function() {
-        return this.role === 'mentor';
-      }
+      // required: function() {
+      //   return this.role === 'mentor';
+      // }
     },
     ifsc: {
       type: String,
-      required: function() {
-        return this.role === 'mentor';
-      }
+      // required: function() {
+      //   return this.role === 'mentor';
+      // }
     },
     bankName: {
       type: String,
-      required: function() {
-        return this.role === 'mentor';
-      }
+      // required: function() {
+      //   return this.role === 'mentor';
+      // }
     }
   },
   status: {
