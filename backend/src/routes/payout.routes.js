@@ -26,6 +26,7 @@ const paymentValidation = [
 ];
 
 // Receipt routes
+router.get('/my-receipts', authenticate, payoutController.getReceiptsForMentor);
 router.post('/receipts', authenticate, authorizeAdmin, receiptValidation, payoutController.createReceipt);
 router.get('/receipts', authenticate, dateRangeValidation, payoutController.getReceipts);
 router.get('/receipts/:id', authenticate, payoutController.getReceiptById);
