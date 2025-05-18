@@ -48,6 +48,37 @@ const userController = {
       });
     }
   },
+  // Get mentor dashboard data
+getMentorDashboard: async (req, res) => {
+  try {
+    const mentorId = req.params.mentorId;
+
+    const mentor = await User.findById(mentorId).select('-password');
+
+    if (!mentor || mentor.role !== 'mentor') {
+      return res.status(404).json({ message: 'Mentor not found' });
+    }
+
+    // Basic dashboard info
+    const dashboardData = {
+      name: mentor.name,
+      email: mentor.email,
+      role: mentor.role,
+      hourlyRate: mentor.hourlyRate,
+      status: mentor.status,
+      taxInfo: mentor.taxInfo,
+      bankDetails: mentor.bankDetails,
+      createdAt: mentor.createdAt,
+      updatedAt: mentor.updatedAt
+      // Add session counts, earnings, ratings, etc. later
+    };
+
+    res.json({ dashboard: dashboardData });
+  } catch (error) {
+    logger.error('Error fetching mentor dashboard:', error);
+    res.status(500).json({ message: 'Error fetching mentor dashboard' });
+  }
+},
 
   // Get user by ID (admin only)
   getUserById: async (req, res) => {

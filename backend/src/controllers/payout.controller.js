@@ -55,7 +55,18 @@ const payoutController = {
       });
     }
   },
+  //Get receipts for mentor
+  getReceiptsForMentor: async (req, res) => {
+    try {
+      const mentorId = req.user._id;
+      const receipts = await Receipt.find({ mentor: mentorId }).sort({ createdAt: -1 });
 
+      res.status(200).json({ receipts });
+    } catch (error) {
+      console.error('Error fetching mentor receipts:', error);
+      res.status(500).json({ message: 'Failed to fetch payout history' });
+    }
+  },
   // Get all receipts
   getReceipts: async (req, res) => {
     try {
