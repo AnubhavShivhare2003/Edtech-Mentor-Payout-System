@@ -37,9 +37,48 @@ const authController = {
         user: user.toPublicProfile()
       });
     } catch (error) {
+      console.error('User save error:', error);
       logger.error('Registration error:', error);
       res.status(500).json({
         message: 'Error registering user'
+      });
+    }
+  },
+
+  // Create admin user (admin only)
+  createAdmin: async (req, res) => {
+    try {
+      const { email } = req.body;
+      
+      // Check if user already exists
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({
+          message: 'User already exists with this email'
+        });
+      }
+
+      // Create new admin user
+      const user = new User({
+        ...req.body,
+        role: 'admin',
+        status: 'active'
+      });
+      await user.save();
+
+      // Generate token
+      const token = generateToken(user);
+
+      res.status(201).json({
+        message: 'Admin user created successfully',
+        token,
+        user: user.toPublicProfile()
+      });
+    } catch (error) {
+      console.error('Admin user creation error:', error);
+      logger.error('Admin creation error:', error);
+      res.status(500).json({
+        message: 'Error creating admin user'
       });
     }
   },

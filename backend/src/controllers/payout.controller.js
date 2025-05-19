@@ -3,6 +3,10 @@ const Receipt = require('../models/receipt.model');
 const User = require('../models/user.model');
 const { createAuditLog } = require('../models/audit.model');
 const logger = require('../utils/logger');
+const Message = require('../models/message.model');
+
+const PLATFORM_FEE_PERCENTAGE = 10; // 10% platform fee
+const TAX_RATE = 0.15; // 15% tax rate
 
 const payoutController = {
   // Create a new receipt
@@ -55,18 +59,7 @@ const payoutController = {
       });
     }
   },
-  //Get receipts for mentor
-  getReceiptsForMentor: async (req, res) => {
-    try {
-      const mentorId = req.user._id;
-      const receipts = await Receipt.find({ mentor: mentorId }).sort({ createdAt: -1 });
 
-      res.status(200).json({ receipts });
-    } catch (error) {
-      console.error('Error fetching mentor receipts:', error);
-      res.status(500).json({ message: 'Failed to fetch payout history' });
-    }
-  },
   // Get all receipts
   getReceipts: async (req, res) => {
     try {
@@ -426,6 +419,134 @@ const payoutController = {
       res.status(500).json({
         message: 'Error downloading receipt'
       });
+    }
+  },
+
+  // Calculate payout for a date range
+  calculatePayout: async (req, res) => {
+    try {
+      const { mentorId, startDate, endDate } = req.body;
+
+      // Get all approved sessions for the date range
+      const sessions = await Session.find({
+        mentor: mentorId,
+        status: 'approved',
+        startTime: { $gte: new Date(startDate) },
+        endTime: { $lte: new Date(endDate) }
+      });
+
+      // Calculate totals
+      const subtotal = sessions.reduce((sum, session) => sum + session.adjustedRate, 0);
+      const platformFee = (subtotal * PLATFORM_FEE_PERCENTAGE) / 100;
+      const taxAmount = (subtotal - platformFee) * TAX_RATE;
+      const totalAmount = subtotal - platformFee - taxAmount;
+
+      res.json({
+        sessions,
+        payoutDetails: {
+          subtotal,
+          platformFee,
+          taxAmount,
+          totalAmount,
+          currency: 'USD'
+        }
+      });
+    } catch (error) {
+      logger.error('Payout calculation error:', error);
+      res.status(500).json({ message: 'Error calculating payout' });
+    }
+  },
+
+  // Generate receipt
+  generateReceipt: async (req, res) => {
+    try {
+      const { mentorId, startDate, endDate, notes } = req.body;
+
+      // Calculate payout
+      const { sessions, payoutDetails } = await payoutController.calculatePayout(req, res);
+
+      // Create receipt
+      const receipt = new Receipt({
+        mentor: mentorId,
+        sessions: sessions.map(s => s._id),
+        startDate,
+        endDate,
+        payoutDetails,
+        notes,
+        auditLog: [{
+          action: 'created',
+          performedBy: req.user._id,
+          details: 'Receipt generated'
+        }]
+      });
+
+      await receipt.save();
+
+      // Send notification to mentor
+      await Message.create({
+        sender: req.user._id,
+        recipient: mentorId,
+        content: `A new receipt (${receipt.receiptNumber}) has been generated for your sessions from ${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}.`,
+        relatedTo: {
+          type: 'receipt',
+          id: receipt._id
+        }
+      });
+
+      res.status(201).json({
+        message: 'Receipt generated successfully',
+        receipt
+      });
+    } catch (error) {
+      logger.error('Receipt generation error:', error);
+      res.status(500).json({ message: 'Error generating receipt' });
+    }
+  },
+
+  // Get receipt history
+  getReceiptHistory: async (req, res) => {
+    try {
+      const { mentorId, page = 1, limit = 10 } = req.query;
+      const query = mentorId ? { mentor: mentorId } : {};
+
+      const receipts = await Receipt.find(query)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(parseInt(limit))
+        .populate('mentor', 'name email')
+        .populate('sessions');
+
+      const total = await Receipt.countDocuments(query);
+
+      res.json({
+        receipts,
+        pagination: {
+          total,
+          page: parseInt(page),
+          pages: Math.ceil(total / limit)
+        }
+      });
+    } catch (error) {
+      logger.error('Receipt history error:', error);
+      res.status(500).json({ message: 'Error fetching receipt history' });
+    }
+  },
+
+  // Get audit logs
+  getAuditLogs: async (req, res) => {
+    try {
+      const { receiptId } = req.params;
+      const receipt = await Receipt.findById(receiptId)
+        .populate('auditLog.performedBy', 'name email');
+
+      if (!receipt) {
+        return res.status(404).json({ message: 'Receipt not found' });
+      }
+
+      res.json(receipt.auditLog);
+    } catch (error) {
+      logger.error('Audit log error:', error);
+      res.status(500).json({ message: 'Error fetching audit logs' });
     }
   }
 };

@@ -1,50 +1,53 @@
-const { Router } = require('express');
-const { body, query } = require('express-validator');
-const { authenticate, authorizeAdmin } = require('../middleware/auth');
+const express = require('express');
+const { body } = require('express-validator');
 const payoutController = require('../controllers/payout.controller');
+const { authenticate } = require('../middleware/auth');
+const { authorizeAdmin } = require('../middleware/authorizeAdmin');
+const validateRequest = require('../middleware/validateRequest');
 
-const router = Router();
+const router = express.Router();
 
 // Validation middleware
-const receiptValidation = [
-  body('mentor').isMongoId(),
-  body('sessions').isArray(),
-  body('sessions.*').isMongoId(),
-  body('startDate').isISO8601(),
-  body('endDate').isISO8601(),
-  body('customMessage').optional().isString()
+const calculatePayoutValidation = [
+  body('mentorId').isMongoId().withMessage('Invalid mentor ID'),
+  body('startDate').isISO8601().withMessage('Invalid start date'),
+  body('endDate').isISO8601().withMessage('Invalid end date')
 ];
 
-const dateRangeValidation = [
-  query('startDate').optional().isISO8601(),
-  query('endDate').optional().isISO8601()
+const generateReceiptValidation = [
+  ...calculatePayoutValidation,
+  body('notes').optional().isString().withMessage('Notes must be a string')
 ];
 
-const paymentValidation = [
-  body('paymentReference').notEmpty(),
-  body('paymentDate').isISO8601()
-];
+// Routes
+router.post(
+  '/calculate',
+  authenticate,
+  authorizeAdmin,
+  calculatePayoutValidation,
+  validateRequest,
+  payoutController.calculatePayout
+);
 
-// Receipt routes
-router.get('/my-receipts', authenticate, payoutController.getReceiptsForMentor);
-router.post('/receipts', authenticate, authorizeAdmin, receiptValidation, payoutController.createReceipt);
-router.get('/receipts', authenticate, dateRangeValidation, payoutController.getReceipts);
-router.get('/receipts/:id', authenticate, payoutController.getReceiptById);
-router.put('/receipts/:id', authenticate, authorizeAdmin, receiptValidation, payoutController.updateReceipt);
-router.delete('/receipts/:id', authenticate, authorizeAdmin, payoutController.deleteReceipt);
-router.post('/receipts/:id/send', authenticate, authorizeAdmin, payoutController.sendReceipt);
-router.get('/receipts/:id/download', authenticate, payoutController.downloadReceipt);
+router.post(
+  '/receipts/generate',
+  authenticate,
+  authorizeAdmin,
+  generateReceiptValidation,
+  validateRequest,
+  payoutController.generateReceipt
+);
 
-// Payment routes
-router.post('/receipts/:id/mark-paid', authenticate, authorizeAdmin, paymentValidation, payoutController.markReceiptAsPaid);
-router.get('/summary', authenticate, dateRangeValidation, payoutController.getPayoutSummary);
-router.get('/pending', authenticate, authorizeAdmin, payoutController.getPendingPayouts);
+router.get(
+  '/receipts',
+  authenticate,
+  payoutController.getReceiptHistory
+);
 
-// Simulation routes
-router.post('/simulate', authenticate, authorizeAdmin, [
-  body('mentor').isMongoId(),
-  body('startDate').isISO8601(),
-  body('endDate').isISO8601()
-], payoutController.simulatePayout);
+router.get(
+  '/receipts/:receiptId/audit',
+  authenticate,
+  payoutController.getAuditLogs
+);
 
 module.exports = router; 

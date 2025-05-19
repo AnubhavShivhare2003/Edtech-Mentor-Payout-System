@@ -21,8 +21,7 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: ['admin', 'mentor'],
-    required: true,
-    default:"mentor"
+    required: true
   },
   hourlyRate: {
     type: Number,
