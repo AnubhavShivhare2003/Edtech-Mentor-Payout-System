@@ -1,16 +1,19 @@
 const mongoose = require('mongoose');
-const { Schema } = mongoose;
 
-const receiptSchema = new Schema({
+const receiptSchema = new mongoose.Schema({
+  receiptNumber: {
+    type: String,
+    required: true,
+    unique: true
+  },
   mentor: {
-    type: Schema.Types.ObjectId,
+    type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
   sessions: [{
-    type: Schema.Types.ObjectId,
-    ref: 'Session',
-    required: true
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Session'
   }],
   startDate: {
     type: Date,
@@ -21,15 +24,7 @@ const receiptSchema = new Schema({
     required: true
   },
   payoutDetails: {
-    totalSessions: {
-      type: Number,
-      required: true
-    },
-    totalDuration: {
-      type: Number,
-      required: true
-    },
-    basePayout: {
+    subtotal: {
       type: Number,
       required: true
     },
@@ -37,53 +32,58 @@ const receiptSchema = new Schema({
       type: Number,
       required: true
     },
-    taxes: {
+    taxAmount: {
       type: Number,
       required: true
     },
-    finalPayout: {
+    totalAmount: {
       type: Number,
       required: true
+    },
+    currency: {
+      type: String,
+      default: 'USD'
     }
   },
   status: {
     type: String,
-    enum: ['draft', 'sent', 'paid'],
-    default: 'draft'
+    enum: ['pending', 'paid', 'cancelled'],
+    default: 'pending'
   },
-  paymentReference: String,
   paymentDate: Date,
-  receiptNumber: {
-    type: String,
-    required: true,
-    unique: true
-  },
-  customMessage: String
+  paymentMethod: String,
+  notes: String,
+  attachments: [{
+    name: String,
+    url: String,
+    type: String
+  }],
+  auditLog: [{
+    action: String,
+    performedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now
+    },
+    details: String
+  }]
 }, {
   timestamps: true
 });
 
-// Generate receipt number before saving
+// Generate receipt number
 receiptSchema.pre('save', async function(next) {
-  if (this.isNew) {
+  if (!this.receiptNumber) {
     const date = new Date();
-    const year = date.getFullYear().toString().slice(-2);
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    
-    // Get the count of receipts for the current month
-    const count = await mongoose.model('Receipt').countDocuments({
-      createdAt: {
-        $gte: new Date(date.getFullYear(), date.getMonth(), 1),
-        $lt: new Date(date.getFullYear(), date.getMonth() + 1, 1)
-      }
-    });
-
-    // Format: RCP-YY-MM-XXXX (e.g., RCP-23-05-0001)
-    this.receiptNumber = `RCP-${year}-${month}-${(count + 1).toString().padStart(4, '0')}`;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const count = await this.constructor.countDocuments();
+    this.receiptNumber = `RCP-${year}${month}-${String(count + 1).padStart(4, '0')}`;
   }
   next();
 });
 
-const Receipt = mongoose.model('Receipt', receiptSchema);
-
-module.exports = Receipt; 
+module.exports = mongoose.model('Receipt', receiptSchema); 
