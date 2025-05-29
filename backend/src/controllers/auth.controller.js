@@ -11,6 +11,52 @@ const generateToken = (user) => {
 };
 
 const authController = {
+  // Setup initial admin (no auth required)
+  setupInitialAdmin: async (req, res) => {
+    try {
+      // Check if any admin exists
+      const adminExists = await User.findOne({ role: 'admin' });
+      if (adminExists) {
+        return res.status(403).json({
+          message: 'Initial admin already exists. Use create-admin endpoint instead.'
+        });
+      }
+
+      const { email } = req.body;
+      
+      // Check if user already exists
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({
+          message: 'User already exists with this email'
+        });
+      }
+
+      // Create new admin user
+      const user = new User({
+        ...req.body,
+        role: 'admin',
+        status: 'active'
+      });
+      await user.save();
+
+      // Generate token
+      const token = generateToken(user);
+
+      res.status(201).json({
+        message: 'Initial admin created successfully',
+        token,
+        user: user.toPublicProfile()
+      });
+    } catch (error) {
+      console.error('Initial admin creation error:', error);
+      logger.error('Initial admin creation error:', error);
+      res.status(500).json({
+        message: 'Error creating initial admin'
+      });
+    }
+  },
+
   // Register new user
   register: async (req, res) => {
     try {

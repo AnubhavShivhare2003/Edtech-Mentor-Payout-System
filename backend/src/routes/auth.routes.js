@@ -6,7 +6,6 @@ const { verifyToken,
   authenticate,
   authorizeAdmin,
   authorizeMentor } = require('../middleware/auth');
-// const { authorizeAdmin } = require('../middleware/authorizeAdmin');
 
 const router = express.Router();
 
@@ -41,7 +40,13 @@ const createAdminValidation = [
 // Routes
 router.post('/register', registerValidation, validateRequest, authController.register);
 router.post('/login', loginValidation, validateRequest, authController.login);
+
+// Initial admin creation (no auth required)
+router.post('/setup-admin', createAdminValidation, validateRequest, authController.setupInitialAdmin);
+
+// Subsequent admin creation (requires admin auth)
 router.post('/create-admin', authenticate, authorizeAdmin, createAdminValidation, validateRequest, authController.createAdmin);
+
 router.post('/logout', authenticate, authController.logout);
 router.get('/me', authenticate, authController.getCurrentUser);
 router.put('/profile', authenticate, authController.updateProfile);

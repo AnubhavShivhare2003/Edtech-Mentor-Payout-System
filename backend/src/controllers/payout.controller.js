@@ -4,6 +4,12 @@ const User = require('../models/user.model');
 const { createAuditLog } = require('../models/audit.model');
 const logger = require('../utils/logger');
 const Message = require('../models/message.model');
+const Payout = require('../models/payout.model');
+const { calculatePlatformFee, calculateTax } = require('../utils/payment.utils');
+
+const PDFDocument = require('pdfkit');
+const { Readable } = require('stream');
+
 
 const PLATFORM_FEE_PERCENTAGE = 10; // 10% platform fee
 const TAX_RATE = 0.15; // 15% tax rate
@@ -421,6 +427,59 @@ const payoutController = {
       });
     }
   },
+  generateReceipt: async (req, res) => {
+  try {
+    const { mentor, startDate, endDate, customMessage } = req.body;
+
+    const sessions = await Session.find({
+      mentor,
+      startTime: { $gte: new Date(startDate), $lte: new Date(endDate) },
+      status: 'approved'
+    });
+
+    if (sessions.length === 0) {
+      return res.status(400).json({ message: 'No approved sessions found in the given date range' });
+    }
+
+    const totalSessions = sessions.length;
+    const totalDuration = sessions.reduce((acc, s) => acc + s.duration, 0);
+    const basePayout = sessions.reduce((acc, s) => acc + s.payoutDetails.basePayout, 0);
+    const platformFee = sessions.reduce((acc, s) => acc + s.payoutDetails.platformFee, 0);
+    const taxes = sessions.reduce((acc, s) => acc + s.payoutDetails.taxes, 0);
+    const finalPayout = sessions.reduce((acc, s) => acc + s.payoutDetails.finalPayout, 0);
+
+    const receipt = new Receipt({
+      mentor,
+      sessions: sessions.map(s => s._id),
+      startDate,
+      endDate,
+      payoutDetails: {
+        totalSessions,
+        totalDuration,
+        basePayout,
+        platformFee,
+        taxes,
+        finalPayout
+      },
+      customMessage,
+      status: 'draft'
+    });
+
+    await receipt.save();
+
+    await createAuditLog(req.user.id, 'create', 'receipt', receipt._id, [
+      { field: 'status', oldValue: null, newValue: 'draft' }
+    ], req);
+
+    res.status(201).json({
+      message: 'Receipt generated successfully',
+      receipt
+    });
+  } catch (error) {
+    logger.error('Generate receipt error:', error);
+    res.status(500).json({ message: 'Error generating receipt' });
+  }
+},
 
   // Calculate payout for a date range
   calculatePayout: async (req, res) => {
@@ -547,6 +606,112 @@ const payoutController = {
     } catch (error) {
       logger.error('Audit log error:', error);
       res.status(500).json({ message: 'Error fetching audit logs' });
+    }
+  },
+
+  // Create a new payout
+  createPayout: async (req, res) => {
+    try {
+      const {
+        mentorId,
+        receipts,
+        period,
+        amount,
+        paymentDetails,
+        notes
+      } = req.body;
+
+      // Verify mentor exists
+      const mentor = await User.findById(mentorId);
+      if (!mentor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Mentor not found',
+          data: null
+        });
+      }
+
+      // Verify all receipts exist and belong to the mentor
+      const receiptDocs = await Receipt.find({
+        _id: { $in: receipts },
+        mentor: mentorId
+      });
+
+      if (receiptDocs.length !== receipts.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more receipts not found or do not belong to the mentor',
+          data: null
+        });
+      }
+
+      // Verify receipts are not already part of another payout
+      const existingPayout = await Payout.findOne({
+        receipts: { $in: receipts }
+      });
+
+      if (existingPayout) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more receipts are already part of another payout',
+          data: null
+        });
+      }
+
+      // Create payout
+      const payout = new Payout({
+        mentor: mentorId,
+        receipts,
+        period: {
+          startDate: new Date(period.startDate),
+          endDate: new Date(period.endDate)
+        },
+        amount: {
+          subtotal: amount.subtotal,
+          platformFee: amount.platformFee,
+          taxAmount: amount.taxAmount,
+          totalAmount: amount.subtotal - amount.platformFee - amount.taxAmount,
+          currency: 'USD'
+        },
+        paymentDetails: {
+          method: paymentDetails.method,
+          accountDetails: paymentDetails.accountDetails || new Map()
+        },
+        notes
+      });
+
+      // Add audit log entry
+      await payout.addAuditLog(
+        'payout_created',
+        req.user._id,
+        'Payout created for receipts'
+      );
+
+      await payout.save();
+
+      // Update receipt statuses to 'paid'
+      await Receipt.updateMany(
+        { _id: { $in: receipts } },
+        { 
+          $set: { 
+            status: 'paid',
+            paymentDate: new Date(),
+            paymentMethod: paymentDetails.method
+          }
+        }
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Payout created successfully',
+        data: payout
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Error creating payout',
+        error: error.message
+      });
     }
   }
 };
