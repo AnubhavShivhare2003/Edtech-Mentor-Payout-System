@@ -38,6 +38,34 @@ const updatePayoutStatusValidation = [
   body('paymentDetails.paymentDate').optional().isISO8601().withMessage('Invalid payment date')
 ];
 
+// Receipt routes
+router.get('/my-receipts', authenticate, payoutController.getReceiptsForMentor);
+
+// Get all receipts (must be before specific receipt routes)
+router.get('/receipts', authenticate, dateRangeValidation, payoutController.getReceipts);
+
+// Receipt CRUD operations
+router.post('/receipts', authenticate, authorizeAdmin, receiptValidation, payoutController.createReceipt);
+router.get('/receipts/:id', authenticate, payoutController.getReceiptById);
+router.put('/receipts/:id', authenticate, authorizeAdmin, receiptValidation, payoutController.updateReceipt);
+router.delete('/receipts/:id', authenticate, authorizeAdmin, payoutController.deleteReceipt);
+
+// Receipt actions
+router.post('/receipts/:id/send', authenticate, authorizeAdmin, payoutController.sendReceipt);
+router.get('/receipts/:id/download', authenticate, payoutController.downloadReceipt);
+router.post('/receipts/:id/mark-paid', authenticate, authorizeAdmin, paymentValidation, payoutController.markReceiptAsPaid);
+
+// Summary and analytics routes
+router.get('/summary', authenticate, dateRangeValidation, payoutController.getPayoutSummary);
+router.get('/pending', authenticate, authorizeAdmin, payoutController.getPendingPayouts);
+
+// Simulation routes
+router.post('/simulate', authenticate, authorizeAdmin, [
+  body('mentor').isMongoId(),
+  body('startDate').isISO8601(),
+  body('endDate').isISO8601()
+], payoutController.simulatePayout);
+=======
 // Payout Routes
 router.post(
   '/calculate',
@@ -105,5 +133,6 @@ router.get(
   authenticate,
   payoutController.getAuditLogs
 );
+
 
 module.exports = router; 
