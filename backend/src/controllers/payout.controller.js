@@ -3,16 +3,6 @@ const Receipt = require('../models/receipt.model');
 const User = require('../models/user.model');
 const { createAuditLog } = require('../models/audit.model');
 const logger = require('../utils/logger');
-const Message = require('../models/message.model');
-const Payout = require('../models/payout.model');
-const { calculatePlatformFee, calculateTax } = require('../utils/payment.utils');
-
-const PDFDocument = require('pdfkit');
-const { Readable } = require('stream');
-
-
-const PLATFORM_FEE_PERCENTAGE = 10; // 10% platform fee
-const TAX_RATE = 0.15; // 15% tax rate
 
 const payoutController = {
   // Create a new receipt
@@ -398,8 +388,11 @@ const payoutController = {
   downloadReceipt: async (req, res) => {
     try {
       const receipt = await Receipt.findById(req.params.id)
-        .populate('mentor', 'name email')
-        .populate('sessions');
+        .populate('mentor', 'name email hourlyRate')
+        .populate({
+          path: 'sessions',
+          select: 'startTime endTime duration sessionType payoutDetails'
+        });
 
       if (!receipt) {
         return res.status(404).json({
@@ -414,12 +407,94 @@ const payoutController = {
         });
       }
 
-      // For now, send the receipt data as JSON
-      // TODO: Implement PDF generation
-      res.json({
-        message: 'Receipt downloaded successfully',
-        receipt
+      // Create PDF document
+      const doc = new PDFDocument();
+      const filename = `receipt-${receipt._id}.pdf`;
+
+      // Set response headers for file download
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+      // Pipe the PDF directly to the response
+      doc.pipe(res);
+
+      // Add content to PDF
+      doc.fontSize(20).text('Mentor Payout Receipt', { align: 'center' });
+      doc.moveDown();
+
+      // Mentor Details
+      doc.fontSize(14).text('Mentor Details');
+      doc.fontSize(12)
+        .text(`Name: ${receipt.mentor.name}`)
+        .text(`Email: ${receipt.mentor.email}`)
+        .text(`Hourly Rate: ₹${receipt.mentor.hourlyRate}`);
+      doc.moveDown();
+
+      // Receipt Details
+      doc.fontSize(14).text('Receipt Details');
+      doc.fontSize(12)
+        .text(`Receipt ID: ${receipt._id}`)
+        .text(`Status: ${receipt.status}`)
+        .text(`Period: ${new Date(receipt.startDate).toLocaleDateString()} to ${new Date(receipt.endDate).toLocaleDateString()}`);
+      doc.moveDown();
+
+      // Sessions Table
+      doc.fontSize(14).text('Sessions');
+      doc.moveDown();
+      let yPos = doc.y;
+      
+      // Table headers
+      const headers = ['Date', 'Type', 'Duration', 'Amount'];
+      const colWidths = [150, 100, 100, 100];
+      
+      headers.forEach((header, i) => {
+        doc.text(header, doc.x + (i > 0 ? colWidths.slice(0, i).reduce((a, b) => a + b, 0) : 0), yPos);
       });
+      
+      doc.moveDown();
+      yPos = doc.y;
+
+      // Table rows
+      receipt.sessions.forEach(session => {
+        const cols = [
+          new Date(session.startTime).toLocaleDateString(),
+          session.sessionType,
+          `${session.duration} mins`,
+          `₹${session.payoutDetails.finalPayout}`
+        ];
+
+        cols.forEach((col, i) => {
+          doc.text(col, doc.x + (i > 0 ? colWidths.slice(0, i).reduce((a, b) => a + b, 0) : 0), yPos);
+        });
+
+        doc.moveDown();
+        yPos = doc.y;
+      });
+
+      doc.moveDown();
+
+      // Summary
+      doc.fontSize(14).text('Summary');
+      doc.fontSize(12)
+        .text(`Total Sessions: ${receipt.payoutDetails.totalSessions}`)
+        .text(`Total Duration: ${receipt.payoutDetails.totalDuration} mins`)
+        .text(`Base Payout: ₹${receipt.payoutDetails.basePayout}`)
+        .text(`Platform Fee: ₹${receipt.payoutDetails.platformFee}`)
+        .text(`Taxes: ₹${receipt.payoutDetails.taxes}`)
+        .text(`Final Payout: ₹${receipt.payoutDetails.finalPayout}`);
+
+      // Payment Details if paid
+      if (receipt.status === 'paid') {
+        doc.moveDown();
+        doc.fontSize(14).text('Payment Details');
+        doc.fontSize(12)
+          .text(`Payment Reference: ${receipt.paymentReference}`)
+          .text(`Payment Date: ${new Date(receipt.paymentDate).toLocaleDateString()}`);
+      }
+
+      // Finalize PDF
+      doc.end();
+
     } catch (error) {
       logger.error('Download receipt error:', error);
       res.status(500).json({
