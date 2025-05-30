@@ -3,9 +3,6 @@ const Receipt = require('../models/receipt.model');
 const User = require('../models/user.model');
 const { createAuditLog } = require('../models/audit.model');
 const logger = require('../utils/logger');
-const PDFDocument = require('pdfkit');
-const path = require('path');
-const fs = require('fs').promises;
 
 const payoutController = {
   // Create a new receipt
@@ -58,18 +55,7 @@ const payoutController = {
       });
     }
   },
-  //Get receipts for mentor
-  getReceiptsForMentor: async (req, res) => {
-    try {
-      const mentorId = req.user._id;
-      const receipts = await Receipt.find({ mentor: mentorId }).sort({ createdAt: -1 });
 
-      res.status(200).json({ receipts });
-    } catch (error) {
-      console.error('Error fetching mentor receipts:', error);
-      res.status(500).json({ message: 'Failed to fetch payout history' });
-    }
-  },
   // Get all receipts
   getReceipts: async (req, res) => {
     try {
@@ -513,6 +499,293 @@ const payoutController = {
       logger.error('Download receipt error:', error);
       res.status(500).json({
         message: 'Error downloading receipt'
+      });
+    }
+  },
+  generateReceipt: async (req, res) => {
+  try {
+    const { mentor, startDate, endDate, customMessage } = req.body;
+
+    const sessions = await Session.find({
+      mentor,
+      startTime: { $gte: new Date(startDate), $lte: new Date(endDate) },
+      status: 'approved'
+    });
+
+    if (sessions.length === 0) {
+      return res.status(400).json({ message: 'No approved sessions found in the given date range' });
+    }
+
+    const totalSessions = sessions.length;
+    const totalDuration = sessions.reduce((acc, s) => acc + s.duration, 0);
+    const basePayout = sessions.reduce((acc, s) => acc + s.payoutDetails.basePayout, 0);
+    const platformFee = sessions.reduce((acc, s) => acc + s.payoutDetails.platformFee, 0);
+    const taxes = sessions.reduce((acc, s) => acc + s.payoutDetails.taxes, 0);
+    const finalPayout = sessions.reduce((acc, s) => acc + s.payoutDetails.finalPayout, 0);
+
+    const receipt = new Receipt({
+      mentor,
+      sessions: sessions.map(s => s._id),
+      startDate,
+      endDate,
+      payoutDetails: {
+        totalSessions,
+        totalDuration,
+        basePayout,
+        platformFee,
+        taxes,
+        finalPayout
+      },
+      customMessage,
+      status: 'draft'
+    });
+
+    await receipt.save();
+
+    await createAuditLog(req.user.id, 'create', 'receipt', receipt._id, [
+      { field: 'status', oldValue: null, newValue: 'draft' }
+    ], req);
+
+    res.status(201).json({
+      message: 'Receipt generated successfully',
+      receipt
+    });
+  } catch (error) {
+    logger.error('Generate receipt error:', error);
+    res.status(500).json({ message: 'Error generating receipt' });
+  }
+},
+
+  // Calculate payout for a date range
+  calculatePayout: async (req, res) => {
+    try {
+      const { mentorId, startDate, endDate } = req.body;
+
+      // Get all approved sessions for the date range
+      const sessions = await Session.find({
+        mentor: mentorId,
+        status: 'approved',
+        startTime: { $gte: new Date(startDate) },
+        endTime: { $lte: new Date(endDate) }
+      });
+
+      // Calculate totals
+      const subtotal = sessions.reduce((sum, session) => sum + session.adjustedRate, 0);
+      const platformFee = (subtotal * PLATFORM_FEE_PERCENTAGE) / 100;
+      const taxAmount = (subtotal - platformFee) * TAX_RATE;
+      const totalAmount = subtotal - platformFee - taxAmount;
+
+      res.json({
+        sessions,
+        payoutDetails: {
+          subtotal,
+          platformFee,
+          taxAmount,
+          totalAmount,
+          currency: 'USD'
+        }
+      });
+    } catch (error) {
+      logger.error('Payout calculation error:', error);
+      res.status(500).json({ message: 'Error calculating payout' });
+    }
+  },
+
+  // Generate receipt
+  generateReceipt: async (req, res) => {
+    try {
+      const { mentorId, startDate, endDate, notes } = req.body;
+
+      // Calculate payout
+      const { sessions, payoutDetails } = await payoutController.calculatePayout(req, res);
+
+      // Create receipt
+      const receipt = new Receipt({
+        mentor: mentorId,
+        sessions: sessions.map(s => s._id),
+        startDate,
+        endDate,
+        payoutDetails,
+        notes,
+        auditLog: [{
+          action: 'created',
+          performedBy: req.user._id,
+          details: 'Receipt generated'
+        }]
+      });
+
+      await receipt.save();
+
+      // Send notification to mentor
+      await Message.create({
+        sender: req.user._id,
+        recipient: mentorId,
+        content: `A new receipt (${receipt.receiptNumber}) has been generated for your sessions from ${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()}.`,
+        relatedTo: {
+          type: 'receipt',
+          id: receipt._id
+        }
+      });
+
+      res.status(201).json({
+        message: 'Receipt generated successfully',
+        receipt
+      });
+    } catch (error) {
+      logger.error('Receipt generation error:', error);
+      res.status(500).json({ message: 'Error generating receipt' });
+    }
+  },
+
+  // Get receipt history
+  getReceiptHistory: async (req, res) => {
+    try {
+      const { mentorId, page = 1, limit = 10 } = req.query;
+      const query = mentorId ? { mentor: mentorId } : {};
+
+      const receipts = await Receipt.find(query)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(parseInt(limit))
+        .populate('mentor', 'name email')
+        .populate('sessions');
+
+      const total = await Receipt.countDocuments(query);
+
+      res.json({
+        receipts,
+        pagination: {
+          total,
+          page: parseInt(page),
+          pages: Math.ceil(total / limit)
+        }
+      });
+    } catch (error) {
+      logger.error('Receipt history error:', error);
+      res.status(500).json({ message: 'Error fetching receipt history' });
+    }
+  },
+
+  // Get audit logs
+  getAuditLogs: async (req, res) => {
+    try {
+      const { receiptId } = req.params;
+      const receipt = await Receipt.findById(receiptId)
+        .populate('auditLog.performedBy', 'name email');
+
+      if (!receipt) {
+        return res.status(404).json({ message: 'Receipt not found' });
+      }
+
+      res.json(receipt.auditLog);
+    } catch (error) {
+      logger.error('Audit log error:', error);
+      res.status(500).json({ message: 'Error fetching audit logs' });
+    }
+  },
+
+  // Create a new payout
+  createPayout: async (req, res) => {
+    try {
+      const {
+        mentorId,
+        receipts,
+        period,
+        amount,
+        paymentDetails,
+        notes
+      } = req.body;
+
+      // Verify mentor exists
+      const mentor = await User.findById(mentorId);
+      if (!mentor) {
+        return res.status(404).json({
+          success: false,
+          message: 'Mentor not found',
+          data: null
+        });
+      }
+
+      // Verify all receipts exist and belong to the mentor
+      const receiptDocs = await Receipt.find({
+        _id: { $in: receipts },
+        mentor: mentorId
+      });
+
+      if (receiptDocs.length !== receipts.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more receipts not found or do not belong to the mentor',
+          data: null
+        });
+      }
+
+      // Verify receipts are not already part of another payout
+      const existingPayout = await Payout.findOne({
+        receipts: { $in: receipts }
+      });
+
+      if (existingPayout) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more receipts are already part of another payout',
+          data: null
+        });
+      }
+
+      // Create payout
+      const payout = new Payout({
+        mentor: mentorId,
+        receipts,
+        period: {
+          startDate: new Date(period.startDate),
+          endDate: new Date(period.endDate)
+        },
+        amount: {
+          subtotal: amount.subtotal,
+          platformFee: amount.platformFee,
+          taxAmount: amount.taxAmount,
+          totalAmount: amount.subtotal - amount.platformFee - amount.taxAmount,
+          currency: 'USD'
+        },
+        paymentDetails: {
+          method: paymentDetails.method,
+          accountDetails: paymentDetails.accountDetails || new Map()
+        },
+        notes
+      });
+
+      // Add audit log entry
+      await payout.addAuditLog(
+        'payout_created',
+        req.user._id,
+        'Payout created for receipts'
+      );
+
+      await payout.save();
+
+      // Update receipt statuses to 'paid'
+      await Receipt.updateMany(
+        { _id: { $in: receipts } },
+        { 
+          $set: { 
+            status: 'paid',
+            paymentDate: new Date(),
+            paymentMethod: paymentDetails.method
+          }
+        }
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Payout created successfully',
+        data: payout
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Error creating payout',
+        error: error.message
       });
     }
   }

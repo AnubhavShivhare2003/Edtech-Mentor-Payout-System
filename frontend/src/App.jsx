@@ -4,9 +4,12 @@ import { store } from './redux/store';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import AdminDashboard from './pages/AdminDashboard';
-import MentorDashboard from './pages/MentorDashboard';
-import PayoutHistory from './pages/mentor/PayoutHistory';
+import AdminDashboard from './pages/admin/AdminDashboard.jsx';
+import MentorDashboard from './pages/mentor/MentorDashboard.jsx';
+import AdminPayoutHistory from './pages/admin/AdminPayoutHistory.jsx';
+import MentorPayoutHistory from './pages/mentor/MentorPayoutHistory.jsx';
+import AdminSessionHistory from './pages/admin/AdminSessionHistory.jsx';
+import MentorSessionHistory from './pages/mentor/MentorSessionHistory.jsx';
 import NotFound from './pages/NotFound';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -32,8 +35,20 @@ const router = createBrowserRouter([
         element: <ProtectedRoute><MentorDashboard /></ProtectedRoute>
       },
       {
-        path: 'payouts',
-        element: <ProtectedRoute><PayoutHistory /></ProtectedRoute>
+        path: 'admin/sessions',
+        element: <ProtectedRoute><AdminSessionHistory /></ProtectedRoute>
+      },
+      {
+        path: 'admin/payouts',
+        element: <ProtectedRoute><AdminPayoutHistory /></ProtectedRoute>
+      },
+      {
+        path: 'mentor/sessions',
+        element: <ProtectedRoute><MentorSessionHistory /></ProtectedRoute>
+      },
+      {
+        path: 'mentor/payouts',
+        element: <ProtectedRoute><MentorPayoutHistory /></ProtectedRoute>
       },
       {
         path: '*',
