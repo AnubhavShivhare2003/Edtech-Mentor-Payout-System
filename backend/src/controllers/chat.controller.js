@@ -215,18 +215,33 @@ const chatController = {
     }
   },
 
-  // Get user status
+  // Get user online status
   getUserStatus: async (req, res) => {
     try {
-      // This would typically be managed by your socket.io implementation
-      // For now, return a simple online status
+      const userId = req.query.userId;
+      
+      if (!userId) {
+        return res.status(400).json({
+          message: 'User ID is required'
+        });
+      }
+
+      const user = await User.findById(userId).select('lastActive status');
+      
+      if (!user) {
+        return res.status(404).json({
+          message: 'User not found'
+        });
+      }
+
       res.json({
-        status: 'online'
+        status: user.status || 'offline',
+        lastActive: user.lastActive
       });
     } catch (error) {
       logger.error('Get user status error:', error);
       res.status(500).json({
-        message: 'Error getting user status'
+        message: 'Error fetching user status'
       });
     }
   },
@@ -239,9 +254,9 @@ const chatController = {
 
       // Emit socket event if socket.io is set up
       if (req.app.get('io')) {
-        req.app.get('io').to(to).emit('typing-status', {
-          userId: from,
-          isTyping: true
+        req.app.get('io').to(to).emit('typing', {
+          from,
+          timestamp: new Date()
         });
       }
 

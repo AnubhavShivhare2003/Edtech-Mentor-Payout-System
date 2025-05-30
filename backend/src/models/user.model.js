@@ -61,8 +61,12 @@ const userSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['active', 'inactive', 'suspended'],
-    default: 'active'
+    enum: ['online', 'offline', 'away'],
+    default: 'offline'
+  },
+  lastActive: {
+    type: Date,
+    default: Date.now
   },
   settings: {
     emailNotifications: {
