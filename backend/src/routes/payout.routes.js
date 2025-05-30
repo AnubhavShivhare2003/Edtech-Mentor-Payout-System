@@ -65,7 +65,7 @@ router.post('/simulate', authenticate, authorizeAdmin, [
   body('startDate').isISO8601(),
   body('endDate').isISO8601()
 ], payoutController.simulatePayout);
-=======
+
 // Payout Routes
 router.post(
   '/calculate',
