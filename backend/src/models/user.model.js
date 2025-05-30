@@ -63,6 +63,21 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: ['active', 'inactive', 'suspended'],
     default: 'active'
+  },
+  settings: {
+    emailNotifications: {
+      type: Boolean,
+      default: true
+    },
+    timezone: {
+      type: String,
+      default: 'UTC'
+    },
+    language: {
+      type: String,
+      enum: ['en', 'hi'],
+      default: 'en'
+    }
   }
 }, {
   timestamps: true

@@ -293,14 +293,20 @@ getMentorDashboard: async (req, res) => {
   // Get user settings
   getSettings: async (req, res) => {
     try {
-      const user = await User.findById(req.user.id, 'settings');
+      const user = await User.findById(req.user.id);
       if (!user) {
         return res.status(404).json({
           message: 'User not found'
         });
       }
 
-      res.json(user.settings || {});
+      res.json({
+        settings: {
+          emailNotifications: user.settings?.emailNotifications ?? true,
+          timezone: user.settings?.timezone ?? 'UTC',
+          language: user.settings?.language ?? 'en'
+        }
+      });
     } catch (error) {
       logger.error('Get settings error:', error);
       res.status(500).json({
@@ -309,14 +315,14 @@ getMentorDashboard: async (req, res) => {
     }
   },
 
-  // Update user settings
+  // Update settings
   updateSettings: async (req, res) => {
     try {
       const user = await User.findByIdAndUpdate(
         req.user.id,
         { $set: { settings: req.body } },
-        { new: true }
-      ).select('settings');
+        { new: true, runValidators: true }
+      );
 
       if (!user) {
         return res.status(404).json({
