@@ -1,4 +1,6 @@
 const User = require('../models/user.model');
+const Session = require('../models/session.model');
+const Payout = require('../models/payout.model');
 const logger = require('../utils/logger');
 const fs = require('fs').promises;
 const path = require('path');
@@ -48,37 +50,6 @@ const userController = {
       });
     }
   },
-  // Get mentor dashboard data
-getMentorDashboard: async (req, res) => {
-  try {
-    const mentorId = req.params.mentorId;
-
-    const mentor = await User.findById(mentorId).select('-password');
-
-    if (!mentor || mentor.role !== 'mentor') {
-      return res.status(404).json({ message: 'Mentor not found' });
-    }
-
-    // Basic dashboard info
-    const dashboardData = {
-      name: mentor.name,
-      email: mentor.email,
-      role: mentor.role,
-      hourlyRate: mentor.hourlyRate,
-      status: mentor.status,
-      taxInfo: mentor.taxInfo,
-      bankDetails: mentor.bankDetails,
-      createdAt: mentor.createdAt,
-      updatedAt: mentor.updatedAt
-      // Add session counts, earnings, ratings, etc. later
-    };
-
-    res.json({ dashboard: dashboardData });
-  } catch (error) {
-    logger.error('Error fetching mentor dashboard:', error);
-    res.status(500).json({ message: 'Error fetching mentor dashboard' });
-  }
-},
 
   // Get user by ID (admin only)
   getUserById: async (req, res) => {
@@ -338,6 +309,221 @@ getMentorDashboard: async (req, res) => {
       logger.error('Update settings error:', error);
       res.status(500).json({
         message: 'Error updating settings'
+      });
+    }
+  },
+
+  // Get mentor stats
+  getMentorStats: async (req, res) => {
+    try {
+      const mentorId = req.params.mentorId;
+
+      // Get mentor details
+      const mentor = await User.findById(mentorId);
+      if (!mentor || mentor.role !== 'mentor') {
+        return res.status(404).json({ message: 'Mentor not found' });
+      }
+
+      // Get session stats
+      const sessionStats = await Session.aggregate([
+        { $match: { mentor: mentorId } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            totalDuration: { $sum: '$duration' },
+            totalAmount: { $sum: '$amount' }
+          }
+        }
+      ]);
+
+      // Get payout stats
+      const payoutStats = await Payout.aggregate([
+        { $match: { mentor: mentorId } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            totalAmount: { $sum: '$amount' }
+          }
+        }
+      ]);
+
+      // Get unique students count
+      const uniqueStudents = await Session.distinct('studentId', { mentor: mentorId });
+
+      // Calculate average rating
+      const sessionsWithRating = await Session.find({
+        mentor: mentorId,
+        rating: { $exists: true, $ne: null }
+      });
+      const averageRating = sessionsWithRating.length > 0
+        ? sessionsWithRating.reduce((acc, session) => acc + session.rating, 0) / sessionsWithRating.length
+        : 0;
+
+      // Transform session stats
+      const sessionCounts = {
+        total: 0,
+        completed: 0,
+        scheduled: 0,
+        active: 0
+      };
+      sessionStats.forEach(stat => {
+        sessionCounts[stat._id] = stat.count;
+        sessionCounts.total += stat.count;
+      });
+
+      // Transform payout stats
+      const payoutAmounts = {
+        total: 0,
+        pending: 0,
+        completed: 0
+      };
+      payoutStats.forEach(stat => {
+        payoutAmounts[stat._id] = stat.totalAmount;
+        payoutAmounts.total += stat.totalAmount;
+      });
+
+      // Compile final stats
+      const stats = {
+        totalSessions: sessionCounts.total,
+        completedSessions: sessionCounts.completed || 0,
+        scheduledSessions: sessionCounts.scheduled || 0,
+        totalEarnings: payoutAmounts.total,
+        pendingPayouts: payoutAmounts.pending || 0,
+        completedPayouts: payoutAmounts.completed || 0,
+        averageRating: Number(averageRating.toFixed(1)),
+        totalStudents: uniqueStudents.length,
+        activeSessions: sessionCounts.active || 0
+      };
+
+      res.json(stats);
+    } catch (error) {
+      logger.error('Get mentor stats error:', error);
+      res.status(500).json({
+        message: 'Error fetching mentor statistics'
+      });
+    }
+  },
+
+  // Get mentor dashboard data
+  getMentorDashboard: async (req, res) => {
+    try {
+      const mentorId = req.params.mentorId;
+
+      // Verify mentor exists and user has access
+      const mentor = await User.findById(mentorId).select('-password');
+      if (!mentor || mentor.role !== 'mentor') {
+        return res.status(404).json({ message: 'Mentor not found' });
+      }
+
+      // Check if user is either the mentor themselves or an admin
+      if (req.user.role !== 'admin' && req.user.id !== mentorId) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
+
+      // Get recent sessions (last 5)
+      const recentSessions = await Session.find({ mentor: mentorId })
+        .sort({ startTime: -1 })
+        .limit(5)
+        .populate('studentId', 'name email');
+
+      // Get recent payouts (last 5)
+      const recentPayouts = await Payout.find({ mentor: mentorId })
+        .sort({ createdAt: -1 })
+        .limit(5);
+
+      // Get session stats
+      const sessionStats = await Session.aggregate([
+        { $match: { mentor: mentorId } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            totalDuration: { $sum: '$duration' },
+            totalAmount: { $sum: '$amount' }
+          }
+        }
+      ]);
+
+      // Get payout stats
+      const payoutStats = await Payout.aggregate([
+        { $match: { mentor: mentorId } },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+            totalAmount: { $sum: '$amount' }
+          }
+        }
+      ]);
+
+      // Get unique students count
+      const uniqueStudents = await Session.distinct('studentId', { mentor: mentorId });
+
+      // Calculate average rating
+      const sessionsWithRating = await Session.find({
+        mentor: mentorId,
+        rating: { $exists: true, $ne: null }
+      });
+      const averageRating = sessionsWithRating.length > 0
+        ? sessionsWithRating.reduce((acc, session) => acc + session.rating, 0) / sessionsWithRating.length
+        : 0;
+
+      // Transform session stats
+      const sessionCounts = {
+        total: 0,
+        completed: 0,
+        scheduled: 0,
+        active: 0
+      };
+      sessionStats.forEach(stat => {
+        sessionCounts[stat._id] = stat.count;
+        sessionCounts.total += stat.count;
+      });
+
+      // Transform payout stats
+      const payoutAmounts = {
+        total: 0,
+        pending: 0,
+        completed: 0
+      };
+      payoutStats.forEach(stat => {
+        payoutAmounts[stat._id] = stat.totalAmount;
+        payoutAmounts.total += stat.totalAmount;
+      });
+
+      // Compile dashboard data
+      const dashboardData = {
+        mentor: {
+          _id: mentor._id,
+          name: mentor.name,
+          email: mentor.email,
+          hourlyRate: mentor.hourlyRate,
+          status: mentor.status,
+          bankDetails: mentor.bankDetails,
+          taxInfo: mentor.taxInfo
+        },
+        stats: {
+          totalSessions: sessionCounts.total,
+          completedSessions: sessionCounts.completed || 0,
+          scheduledSessions: sessionCounts.scheduled || 0,
+          totalEarnings: payoutAmounts.total,
+          pendingPayouts: payoutAmounts.pending || 0,
+          completedPayouts: payoutAmounts.completed || 0,
+          averageRating: Number(averageRating.toFixed(1)),
+          totalStudents: uniqueStudents.length,
+          activeSessions: sessionCounts.active || 0
+        },
+        recentSessions,
+        recentPayouts
+      };
+
+      res.json(dashboardData);
+    } catch (error) {
+      logger.error('Get mentor dashboard error:', error);
+      res.status(500).json({
+        message: 'Error fetching mentor dashboard data'
       });
     }
   }

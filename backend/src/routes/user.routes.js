@@ -47,7 +47,6 @@ router.post('/profile/picture', authenticate, upload.single('picture'), userCont
 // Admin only routes
 router.get('/', authenticate, authorizeAdmin, userController.getAllUsers);
 router.get('/mentors', authenticate, authorizeAdmin, userController.getAllMentors);
-router.get('/mentors/:mentorId/dashboard', authenticate, userController.getMentorDashboard);
 router.get('/:id', authenticate, authorizeAdmin, userController.getUserById);
 router.put('/:id', authenticate, authorizeAdmin, profileUpdateValidation, userController.updateUser);
 router.delete('/:id', authenticate, authorizeAdmin, userController.deleteUser);
@@ -61,5 +60,10 @@ router.put('/settings', authenticate, [
   body('timezone').optional().isString(),
   body('language').optional().isIn(['en', 'hi'])
 ], userController.updateSettings);
+
+// Mentor routes
+router.get('/mentors/:mentorId', authenticate, userController.getMentorById);
+router.get('/mentors/:mentorId/stats', authenticate, userController.getMentorStats);
+router.get('/mentors/:mentorId/dashboard', authenticate, userController.getMentorDashboard);
 
 module.exports = router; 

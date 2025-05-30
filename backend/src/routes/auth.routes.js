@@ -2,7 +2,10 @@ const express = require('express');
 const { body } = require('express-validator');
 const authController = require('../controllers/auth.controller');
 const validateRequest = require('../middleware/validateRequest');
-const { authenticate } = require('../middleware/auth');
+const { verifyToken,
+  authenticate,
+  authorizeAdmin,
+  authorizeMentor } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -13,7 +16,7 @@ const registerValidation = [
   body('password')
     .isLength({ min: 6 })
     .withMessage('Password must be at least 6 characters long'),
-  body('role').isIn(['admin', 'mentor']).withMessage('Invalid role'),
+  body('role').equals('mentor').withMessage('Only mentor role is allowed during registration'),
   body('hourlyRate')
     .if(body('role').equals('mentor'))
     .isNumeric()
@@ -25,9 +28,25 @@ const loginValidation = [
   body('password').notEmpty().withMessage('Password is required')
 ];
 
+const createAdminValidation = [
+  body('name').trim().notEmpty().withMessage('Name is required'),
+  body('email').isEmail().withMessage('Please enter a valid email'),
+  body('password')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters long'),
+  body('role').equals('admin').withMessage('Only admin role is allowed for this endpoint')
+];
+
 // Routes
 router.post('/register', registerValidation, validateRequest, authController.register);
 router.post('/login', loginValidation, validateRequest, authController.login);
+
+// Initial admin creation (no auth required)
+router.post('/setup-admin', createAdminValidation, validateRequest, authController.setupInitialAdmin);
+
+// Subsequent admin creation (requires admin auth)
+router.post('/create-admin', authenticate, authorizeAdmin, createAdminValidation, validateRequest, authController.createAdmin);
+
 router.post('/logout', authenticate, authController.logout);
 router.get('/me', authenticate, authController.getCurrentUser);
 router.put('/profile', authenticate, authController.updateProfile);
